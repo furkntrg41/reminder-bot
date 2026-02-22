@@ -12,6 +12,10 @@ from apscheduler.triggers.cron import CronTrigger
 scheduler = AsyncIOScheduler(timezone="Europe/Istanbul")
 bot_instance = None
 
+# DATA_FILE: Railway'de DATA_DIR=/data ayarlı olacak, lokalde script klasörü
+_data_dir = os.environ.get("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+DATA_FILE = os.path.join(_data_dir, "reminders.json")
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -39,7 +43,7 @@ async def ekle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     event = datetime(yil, ay, gun, saat, dakika)
 
-    dosya = os.path.join(os.path.dirname(__file__), "reminders.json")
+    dosya = DATA_FILE
 
     if os.path.exists(dosya):
         with open(dosya, "r", encoding="utf-8") as f:
@@ -86,7 +90,7 @@ async def ekle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    dosya = os.path.join(os.path.dirname(__file__), "reminders.json")
+    dosya = DATA_FILE
 
     if not os.path.exists(dosya):
         await update.message.reply_text("Hic hatirlatici yok.")
@@ -126,7 +130,36 @@ async def baslangic(app):
         id="sabah_ozeti",
         replace_existing=True
     )
-    
+
+    # Geçmiş kayıtları sil, gelecek olanları yeniden planla
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            kayitlar = json.load(f)
+        now = datetime.now()
+        gelecek = [r for r in kayitlar if datetime.fromisoformat(r["tarih"]) > now]
+        gecmis_sayi = len(kayitlar) - len(gelecek)
+        if gecmis_sayi > 0:
+            with open(DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(gelecek, f, ensure_ascii=False, indent=2)
+            logging.info(f"{gecmis_sayi} gecmis hatirlatici silindi.")
+        # Kalan kayıtları scheduler'a ekle
+        for r in gelecek:
+            event = datetime.fromisoformat(r["tarih"])
+            cid = r["chat_id"]
+            not_ = r["not"]
+            bir_gun_once  = event - timedelta(days=1)
+            bir_saat_once = event - timedelta(hours=1)
+            if bir_gun_once > now:
+                scheduler.add_job(bildirim_gonder, DateTrigger(run_date=bir_gun_once),
+                                  args=[cid, f"Yarin: {not_}\n{event.strftime('%d.%m.%Y %H:%M')}"])
+            if bir_saat_once > now:
+                scheduler.add_job(bildirim_gonder, DateTrigger(run_date=bir_saat_once),
+                                  args=[cid, f"1 saat sonra: {not_}\n{event.strftime('%d.%m.%Y %H:%M')}"])
+            if event > now:
+                scheduler.add_job(bildirim_gonder, DateTrigger(run_date=event),
+                                  args=[cid, f"Simdi: {not_}"])
+        logging.info(f"{len(gelecek)} aktif hatirlatici yeniden planlandı.")
+
 
 # Bildirim gönderici - scheduler bu fonksiyonu çağırır
 async def bildirim_gonder(chat_id, metin):
@@ -134,11 +167,9 @@ async def bildirim_gonder(chat_id, metin):
 
 # Her sabah 09:00'da çalışır - o gün ne var varsa yazar
 async def sabah_ozeti():
-    dosya = os.path.join(os.path.dirname(__file__), "reminders.json")
-    if not os.path.exists(dosya):
+    if not os.path.exists(DATA_FILE):
         return
-
-    with open(dosya, "r", encoding="utf-8") as f:
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
         kayitlar = json.load(f)
 
     bugun = datetime.now().strftime("%Y-%m-%d")
@@ -168,12 +199,10 @@ async def test_ozet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def bugun(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    dosya = os.path.join(os.path.dirname(__file__), "reminders.json")
-    if not os.path.exists(dosya):
+    if not os.path.exists(DATA_FILE):
         await update.message.reply_text("Bugun hicbir sey yok.")
         return
-
-    with open(dosya, "r", encoding="utf-8") as f:
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
         kayitlar = json.load(f)
 
     bugun_str = datetime.now().strftime("%Y-%m-%d")

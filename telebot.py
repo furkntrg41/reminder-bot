@@ -100,7 +100,10 @@ async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mesaj = "Hatirlaticilar:\n"
     now = datetime.now()
-    gelecek = [r for r in kayitlar if datetime.fromisoformat(r["tarih"]) > now]
+    gelecek = sorted(
+        [r for r in kayitlar if datetime.fromisoformat(r["tarih"]) > now],
+        key=lambda r: r["tarih"]   # en yakından en uzağa
+    )
 
     if not gelecek:
         await update.message.reply_text("Gelecek hatirlatici yok.")
@@ -164,6 +167,33 @@ async def test_ozet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Sabah ozeti gonderildi (test).")
 
 
+async def bugun(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    dosya = os.path.join(os.path.dirname(__file__), "reminders.json")
+    if not os.path.exists(dosya):
+        await update.message.reply_text("Bugun hicbir sey yok.")
+        return
+
+    with open(dosya, "r", encoding="utf-8") as f:
+        kayitlar = json.load(f)
+
+    bugun_str = datetime.now().strftime("%Y-%m-%d")
+    bugunun = sorted(
+        [r for r in kayitlar if r["tarih"].startswith(bugun_str)],
+        key=lambda r: r["tarih"]
+    )
+
+    if not bugunun:
+        await update.message.reply_text("Bugun hicbir sey yok.")
+        return
+
+    mesaj = "Bugun:\n"
+    for r in bugunun:
+        dt = datetime.fromisoformat(r["tarih"])
+        mesaj += f"  • {dt.strftime('%H:%M')} - {r['not']}\n"
+
+    await update.message.reply_text(mesaj)
+
+
 if __name__ == '__main__':
     # Railway'de TOKEN environment variable olarak verilecek
     # Lokalde token.txt'den okur
@@ -181,6 +211,7 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('start',    start))
     application.add_handler(CommandHandler('ekle',     ekle))
     application.add_handler(CommandHandler('liste',    liste))
+    application.add_handler(CommandHandler('bugun',    bugun))
     application.add_handler(CommandHandler('test',     test_ozet))
 
     print("Bot çalışıyor...")
